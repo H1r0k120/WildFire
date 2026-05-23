@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>山火事シミュレーター (v1.9.3 - 風向矢印修正版)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { font-family: sans-serif; background: #f0f2f5; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+    h1 { margin-bottom: 10px; color: #333; }
+    #container { display: flex; gap: 20px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    #controls { display: flex; flex-direction: column; gap: 12px; min-width: 260px; border-right: 1px solid #eee; padding-right: 20px; }
+    .param { display: flex; flex-direction: column; font-size: 13px; font-weight: bold; }
+    .param span { font-weight: normal; margin-top: 3px; }
+    input[type="range"], select { margin-top: 3px; padding: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 13px; }
+    .btn-group { display: flex; gap: 8px; }
+    button { flex: 1; padding: 10px; font-weight: bold; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    #start-stop-btn { background: #28a745; }
+    #start-stop-btn.paused { background: #ffc107; color: #333; }
+    #reset-btn { background: #dc3545; }
+    #clear-img-btn { background: #6c757d; padding: 6px; font-size: 12px; margin-top: 5px; }
+    button:hover { opacity: 0.9; }
+    #canvas-container { border: 1px solid #ccc; position: relative; }
+    #image-upload { font-size: 12px; margin-top: 4px; width: 100%; }
+    .img-area { background: #f8f9fa; border: 1px dashed #ccc; padding: 10px; border-radius: 4px; }
+    
+    .stat-box { font-size: 12px; color: #333; background: #f8f9fa; padding: 10px; border-radius: 4px; line-height: 1.6; border: 1px solid #e2e8f0; }
+    .stat-title { font-weight: bold; border-bottom: 1px solid #ddd; margin-bottom: 5px; padding-bottom: 2px; color: #4a5568; }
+    .stat-row { display: flex; justify-content: space-between; margin-bottom: 2px; }
+    .stat-val { font-family: monospace; font-weight: bold; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; margin-top: 5px; }
+    .legend-item { display: flex; align-items: center; gap: 3px; }
+    .color-swatch { width: 12px; height: 12px; border: 1px solid #ccc; border-radius: 2px; }
+
+    .height-gradient {
+      height: 12px;
+      width: 100%;
+      background: linear-gradient(to right, #444, #fff);
+      border: 1px solid #ccc;
+      border-radius: 2px;
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>山火事シミュレーター (v1.9.3)</h1>
+  
+  <div id="container">
+    <div id="controls">
+      <div class="btn-group">
+        <button id="start-stop-btn">一時停止</button>
+        <button id="reset-btn">リセット</button>
+      </div>
+      
+      <hr>
+
+      <!-- 航空写真読み込みエリア -->
+      <div class="param img-area">
+        <label>📸 航空写真から地形を生成</label>
+        <input type="file" id="image-upload" accept="image/*">
+        <button id="clear-img-btn" style="display:none;">画像を削除</button>
+      </div>
+
+      <!-- スライダー類 -->
+      <div id="density-area" class="param">
+        <label>森林密度: <span id="density-val">70</span>%</label>
+        <input type="range" id="density" min="10" max="95" value="70">
+      </div>
+
+      <!-- 山の複雑さスライダー -->
+      <div id="noise-area" class="param">
+        <label>⛰️ 山のうねり具合: <span id="noise-scale-val">4.0</span></label>
+        <input type="range" id="noise-scale" min="1.0" max="10.0" step="0.5" value="4.0">
+      </div>
+
+      <div class="param">
+        <label>乾燥度 (延焼確率): <span id="prob-val">30</span>%</label>
+        <input type="range" id="prob" min="5" max="100" value="30">
+      </div>
+      
+      <!-- ★修正箇所：風向セレクトボックスの矢印の向きを進行方向に修正 -->
+      <div class="param">
+        <label>風向 / 風速: <span id="wind-val">2.0</span></label>
+        <div class="btn-group" style="gap:5px;">
+          <select id="wind-dir" style="width: 50%; font-size:12px;">
+            <option value="NONE">無風</option>
+            <option value="WEST">西 (→)</option>
+            <option value="EAST">東 (←)</option>
+            <option value="NORTH">北 (↓)</option>
+            <option value="SOUTH">南 (↑)</option>
+          </select>
+          <input type="range" id="wind" min="0" max="10" step="0.5" value="2.0" style="width: 50%;">
+        </div>
+      </div>
+
+      <div class="param">
+        <label>⛰️ 傾斜の影響度: <span id="slope-weight-val">3.0</span></label>
+        <input type="range" id="slope-weight" min="0" max="10" step="0.5" value="3.0">
+      </div>
+
+      <hr>
+
+      <!-- リアルタイム統計モニター -->
+      <div class="stat-box">
+        <div class="stat-title">📊 リアルタイム統計</div>
+        <div class="stat-row" style="background: #edf2f7; padding: 2px 4px; border-radius: 3px; margin-bottom: 6px;">
+          <span>経過時間:</span><span id="stat-steps" class="stat-val" style="color:#4a5568;">0 step</span>
+        </div>
+        <div class="stat-row"><span>初期の森林マス:</span><span id="stat-init-tree" class="stat-val">0</span></div>
+        <div class="stat-row"><span>現在の生存森林:</span><span id="stat-current-tree" class="stat-val">0</span></div>
+        <div class="stat-row"><span>現在燃焼中🔥:</span><span id="stat-burning" class="stat-val" style="color:red;">0</span></div>
+        <div class="stat-row"><span>焼失した面積🪨:</span><span id="stat-burned" class="stat-val" style="color:#555;">0</span></div>
+        <div class="stat-row" style="border-top: 1px dashed #ccc; margin-top: 5px; padding-top: 5px; font-weight: bold;">
+          <span>森林の生存率:</span><span id="stat-survival-rate" class="stat-val" style="color:#28a745;">100.0%</span>
+        </div>
+      </div>
+
+      <!-- 地質カテゴリ -->
+      <div class="stat-box">
+        <div class="stat-title">地質カテゴリ</div>
+        <div class="legend">
+          <div class="legend-item"><div class="color-swatch" style="background:rgba(46,139,87,1);"></div>森林</div>
+          <div class="legend-item"><div class="color-swatch" style="background:rgba(100,149,237,1);"></div>水</div>
+          <div class="legend-item"><div class="color-swatch" style="background:rgba(211,211,211,1);"></div>雪/氷</div>
+          <div class="legend-item"><div class="color-swatch" style="background:rgba(128,128,128,1);"></div>岩/市街</div>
+          <div class="legend-item"><div class="color-swatch" style="background:rgba(222,184,135,1);"></div>空き地</div>
+        </div>
+      </div>
+
+      <!-- 地形の高さ（高低差） -->
+      <div class="stat-box">
+        <div class="stat-title">⛰️ 地形の高さ（高低差）</div>
+        <div style="font-size: 11px; color: #4a5568; line-height: 1.4;">
+          各マスはベースの色に高低差が重なっています。<br>
+          <strong>色の明るさ（陰影）</strong>で標高を判別できます。
+          <div class="height-gradient"></div>
+          <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px;">
+            <span>低（谷・影）</span>
+            <span>高（山頂・日向）</span>
+          </div>
+          <span style="color: #c53030;">※火は「低い場所」から「高い場所」へ向かって燃え広がりやすくなります。</span>
+        </div>
+      </div>
+
+      <p style="font-size: 12px; color: #666; line-height: 1.4; margin: 0;">
+        【モード】<span id="mode-status" style="font-weight:bold; color:#28a745;">ランダム生成</span>
+      </p>
+    </div>
+
+    <div id="canvas-container"></div>
+  </div>
+
+  <script>
+    const MATERIAL_EMPTY = 0; 
+    const MATERIAL_TREE = 1;  
+    const MATERIAL_ROCK = 2;  
+    const MATERIAL_WATER = 3; 
+    const MATERIAL_SNOW = 4;  
+
+    const numCells = 100; 
+    const cellSize = 6;
+    
+    let grid_material = []; 
+    let grid_state = [];    
+    let nextGrid_state = [];
+    let grid_height = [];   
+    
+    let isRunning = true; 
+    let imageBaseMaterialGrid = null;
+    let imageBaseHeightGrid = null; 
+
+    let initialTreeCount = 0;
+    let stepCount = 0;
+    let hasStartedBurning = false; 
+    let isBurningFinished = false; 
+
+    let currentNoiseSeed = 0;
+
+    function setup() {
+      let canvas = createCanvas(numCells * cellSize, numCells * cellSize);
+      canvas.parent('canvas-container');
+      frameRate(10);
+      
+      currentNoiseSeed = Math.floor(random(10000)); 
+      initSimulation();
+
+      document.getElementById('reset-btn').addEventListener('click', () => {
+        currentNoiseSeed = Math.floor(random(10000));
+        initSimulation();
+      });
+      document.getElementById('image-upload').addEventListener('change', handleImageUpload);
+      document.getElementById('clear-img-btn').addEventListener('click', clearImageGrid);
+      
+      const startStopBtn = document.getElementById('start-stop-btn');
+      startStopBtn.addEventListener('click', toggleRunning);
+
+      document.getElementById('density').addEventListener('input', updateUIVal);
+      document.getElementById('noise-scale').addEventListener('input', updateUIVal); 
+      document.getElementById('prob').addEventListener('input', updateUIVal);
+      document.getElementById('wind').addEventListener('input', updateUIVal);
+      document.getElementById('slope-weight').addEventListener('input', updateUIVal); 
+      
+      document.getElementById('density').addEventListener('change', initSimulation);
+      document.getElementById('noise-scale').addEventListener('change', initSimulation);
+
+      document.getElementById('wind-dir').addEventListener('change', () => {
+        if (!isRunning) redraw();
+      });
+    }
+
+    function toggleRunning() {
+      if (isBurningFinished) return; 
+      
+      const btn = document.getElementById('start-stop-btn');
+      if (isRunning) { 
+        noLoop(); 
+        isRunning = false;
+        btn.innerText = "再開";
+        btn.classList.add('paused');
+      } else { 
+        loop(); 
+        isRunning = true;
+        btn.innerText = "一時停止";
+        btn.classList.remove('paused');
+      }
+    }
+
+    function updateUIVal(e) {
+      document.getElementById(`${e.target.id}-val`).innerText = e.target.value;
+    }
+
+    function initSimulation() {
+      grid_material = [];
+      grid_state = [];
+      nextGrid_state = [];
+      grid_height = []; 
+      initialTreeCount = 0; 
+      stepCount = 0;
+      hasStartedBurning = false;
+      isBurningFinished = false; 
+      
+      const startStopBtn = document.getElementById('start-stop-btn');
+      if (!isRunning) {
+        isRunning = true;
+        loop();
+      }
+      startStopBtn.innerText = "一時停止";
+      startStopBtn.classList.remove('paused');
+      
+      if (imageBaseMaterialGrid !== null) {
+        for (let x = 0; x < numCells; x++) {
+          grid_material[x] = [];
+          grid_state[x] = [];
+          nextGrid_state[x] = [];
+          grid_height[x] = [];
+          for (let y = 0; y < numCells; y++) {
+            grid_material[x][y] = imageBaseMaterialGrid[x][y];
+            grid_height[x][y] = imageBaseHeightGrid[x][y]; 
+            grid_state[x][y] = 0; 
+            nextGrid_state[x][y] = 0;
+            if (grid_material[x][y] === MATERIAL_TREE) initialTreeCount++;
+          }
+        }
+      } else {
+        noiseSeed(currentNoiseSeed);
+        let density = document.getElementById('density').value / 100;
+        let ns = document.getElementById('noise-scale').value * 0.01; 
+
+        for (let x = 0; x < numCells; x++) {
+          grid_material[x] = [];
+          grid_state[x] = [];
+          nextGrid_state[x] = [];
+          grid_height[x] = [];
+          for (let y = 0; y < numCells; y++) {
+            let nVal = noise(x * ns, y * ns); 
+            grid_height[x][y] = nVal; 
+
+            let treeThreshold = density + (nVal - 0.5) * 0.2; 
+            let isTree = random(1) < treeThreshold;
+            
+            grid_material[x][y] = isTree ? MATERIAL_TREE : MATERIAL_EMPTY;
+            grid_state[x][y] = 0; 
+            nextGrid_state[x][y] = 0;
+            if (isTree) initialTreeCount++;
+          }
+        }
+      }
+
+      updateStatistics();
+    }
+
+    function updateStatistics() {
+      if (grid_material.length < numCells || grid_state.length < numCells) return 0;
+
+      let currentTree = 0;
+      let burning = 0;
+      let burned = 0;
+
+      for (let x = 0; x < numCells; x++) {
+        for (let y = 0; y < numCells; y++) {
+          if (grid_material[x][y] === MATERIAL_TREE) {
+            if (grid_state[x][y] === 0) currentTree++;
+            if (grid_state[x][y] === 1) burning++;
+            if (grid_state[x][y] === 2) burned++;
+          } else {
+            if (grid_state[x][y] === 1) burning++;
+            if (grid_state[x][y] === 2) burned++;
+          }
+        }
+      }
+
+      if (burning > 0) {
+        hasStartedBurning = true;
+      }
+
+      let survivalRate = initialTreeCount > 0 ? (currentTree / initialTreeCount) * 100 : 100;
+      let totalCells = numCells * numCells;
+
+      document.getElementById('stat-steps').innerText = isBurningFinished ? `${stepCount} step (完全鎮火)` : `${stepCount} step`;
+      document.getElementById('stat-init-tree').innerText = `${initialTreeCount} マス (${((initialTreeCount/totalCells)*100).toFixed(1)}%)`;
+      document.getElementById('stat-current-tree').innerText = `${currentTree} マス`;
+      document.getElementById('stat-burning').innerText = `${burning} マス`;
+      document.getElementById('stat-burned').innerText = `${burned} マス`;
+      document.getElementById('stat-survival-rate').innerText = `${survivalRate.toFixed(1)}%`;
+      
+      let rateElem = document.getElementById('stat-survival-rate');
+      if(survivalRate > 80) rateElem.style.color = '#28a745';
+      else if(survivalRate > 40) rateElem.style.color = '#ffc107';
+      else rateElem.style.color = '#dc3545';
+
+      return burning;
+    }
+
+    function handleImageUpload(event) {
+      let file = event.target.files[0];
+      if (file) {
+        let reader = new FileReader();
+        reader.onload = (e) => {
+          loadImage(e.target.result, (img) => {
+            generateImageBaseMaterial(img);
+            initSimulation();
+            
+            document.getElementById('clear-img-btn').style.display = 'block';
+            document.getElementById('density-area').style.opacity = '0.3';
+            document.getElementById('noise-area').style.opacity = '0.3'; 
+            document.getElementById('mode-status').innerText = '航空写真モード';
+            document.getElementById('mode-status').style.color = '#007bff';
+          });
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function generateImageBaseMaterial(img) {
+      imageBaseMaterialGrid = [];
+      imageBaseHeightGrid = []; 
+      img.resize(numCells, numCells);
+      img.loadPixels();
+
+      for (let x = 0; x < numCells; x++) {
+        imageBaseMaterialGrid[x] = [];
+        imageBaseHeightGrid[x] = [];
+        for (let y = 0; y < numCells; y++) {
+          let c = img.get(x, y); 
+          let r = red(c); let g = green(c); let b = blue(c);
+          let brightnessVal = (r + g + b) / 3;
+          
+          imageBaseHeightGrid[x][y] = brightnessVal / 255.0;
+
+          let mat;
+          if (brightnessVal > 220) {
+            mat = MATERIAL_SNOW;
+          } else if (b > r * 1.1 && b > g) {
+            mat = MATERIAL_WATER;
+          } else if (g > r * 1.05 && g > b * 1.05) {
+            mat = MATERIAL_TREE;
+          } else if (brightnessVal < 160 && abs(r-g) < 15 && abs(g-b) < 15) {
+            mat = MATERIAL_ROCK;
+          } else {
+            mat = MATERIAL_EMPTY;
+          }
+          imageBaseMaterialGrid[x][y] = mat;
+        }
+      }
+    }
+
+    function clearImageGrid() {
+      imageBaseMaterialGrid = null; 
+      imageBaseHeightGrid = null;
+      document.getElementById('image-upload').value = ''; 
+      document.getElementById('clear-img-btn').style.display = 'none';
+      document.getElementById('density-area').style.opacity = '1.0';
+      document.getElementById('noise-area').style.opacity = '1.0';
+      document.getElementById('mode-status').innerText = 'ランダム生成';
+      document.getElementById('mode-status').style.color = '#28a745';
+      initSimulation(); 
+    }
+
+    function draw() {
+      if (grid_material.length < numCells || grid_state.length < numCells) return;
+
+      background(240);
+
+      for (let x = 0; x < numCells; x++) {
+        for (let y = 0; y < numCells; y++) {
+          let mat = grid_material[x][y];
+          let baseColor;
+          if (mat === MATERIAL_TREE)       baseColor = color(46, 139, 87);
+          else if (mat === MATERIAL_WATER)  baseColor = color(100, 149, 237);
+          else if (mat === MATERIAL_SNOW)   baseColor = color(211, 211, 211);
+          else if (mat === MATERIAL_ROCK)   baseColor = color(128, 128, 128);
+          else                              baseColor = color(222, 184, 135);
+
+          let h = grid_height[x][y];
+          let brightnessDiff = (h - 0.5) * 80; 
+          
+          let r = red(baseColor) + brightnessDiff;
+          let g = green(baseColor) + brightnessDiff;
+          let b = blue(baseColor) + brightnessDiff;
+          baseColor = color(constrain(r,0,255), constrain(g,0,255), constrain(b,0,255));
+
+          let state = grid_state[x][y];
+          let finalColor;
+          if (state === 1)      finalColor = color(255, 69, 0); 
+          else if (state === 2) finalColor = color(80);         
+          else                  finalColor = baseColor;         
+
+          fill(finalColor);
+          noStroke();
+          rect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+
+      if (isBurningFinished) {
+        noLoop();
+        return;
+      }
+
+      if (!isRunning) return;
+
+      if (hasStartedBurning) {
+        stepCount++;
+      }
+
+      let baseProb = document.getElementById('prob').value / 100;
+      let windProb = parseFloat(document.getElementById('wind').value) * 0.1;
+      let windDir = document.getElementById('wind-dir').value;
+      let slopeWeight = parseFloat(document.getElementById('slope-weight').value) * 0.2;
+
+      for (let x = 0; x < numCells; x++) {
+        for (let y = 0; y < numCells; y++) {
+          if (grid_state[x][y] === 1) {
+            nextGrid_state[x][y] = 2;
+          } 
+          else if ((grid_material[x][y] === MATERIAL_TREE || grid_material[x][y] === MATERIAL_EMPTY) && grid_state[x][y] === 0) {
+            let totalChance = calculateSpreadChance(x, y, baseProb, windProb, windDir, slopeWeight);
+            if (grid_material[x][y] === MATERIAL_EMPTY) totalChance *= 0.3; 
+
+            if (totalChance > 0 && random(1) < totalChance) {
+              nextGrid_state[x][y] = 1;
+            }
+          }
+        }
+      }
+
+      for (let x = 0; x < numCells; x++) {
+        for (let y = 0; y < numCells; y++) {
+          grid_state[x][y] = nextGrid_state[x][y];
+        }
+      }
+
+      let activeBurning = updateStatistics();
+
+      if (hasStartedBurning && activeBurning === 0) {
+        isBurningFinished = true;
+        isRunning = false;
+        const btn = document.getElementById('start-stop-btn');
+        btn.innerText = "鎮火 (終了)";
+        btn.classList.add('paused');
+        document.getElementById('stat-steps').innerText = `${stepCount} step (完全鎮火)`;
+      }
+    }
+
+    function calculateSpreadChance(x, y, baseProb, windProb, dir, slopeWeight) {
+      let finalChance = 0;
+      
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (dx === 0 && dy === 0) continue;
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx >= 0 && nx < numCells && ny >= 0 && ny < numCells) {
+            if (grid_state[nx][ny] === 1) {
+              let prob = baseProb;
+              
+              if (dir === "WEST" && dx === -1)  prob += windProb; 
+              if (dir === "EAST" && dx === 1)   prob += windProb; 
+              if (dir === "NORTH" && dy === -1) prob += windProb; 
+              if (dir === "SOUTH" && dy === 1)  prob += windProb; 
+
+              let heightDiff = grid_height[nx][ny] - grid_height[x][y];
+              prob += heightDiff * slopeWeight;
+
+              prob = constrain(prob, 0, 1);
+              if (prob > finalChance) finalChance = prob; 
+            }
+          }
+        }
+      }
+      return finalChance;
+    }
+
+    function mousePressed() {
+      if (grid_material.length < numCells || grid_state.length < numCells) return;
+      if (isBurningFinished) return; 
+
+      let cellX = Math.floor(mouseX / cellSize);
+      let cellY = Math.floor(mouseY / cellSize);
+      if (cellX >= 0 && cellX < numCells && cellY >= 0 && cellY < numCells) {
+        if ((grid_material[cellX][cellY] === MATERIAL_TREE || grid_material[cellX][cellY] === MATERIAL_EMPTY) && grid_state[cellX][cellY] === 0) {
+          grid_state[cellX][cellY] = 1;
+          nextGrid_state[cellX][cellY] = 1;
+          updateStatistics(); 
+          if (!isRunning) redraw(); 
+        }
+      }
+    }
+  </script>
+</body>
+</html>
