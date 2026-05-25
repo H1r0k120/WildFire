@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>山火事シミュレーター (v1.9.3 - 風向矢印修正版)</title>
+  <title>山火事シミュレーター (v3.2 - スライダー不具合修正版)</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <style>
     body { font-family: sans-serif; background: #f0f2f5; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
@@ -14,11 +14,24 @@
     input[type="range"], select { margin-top: 3px; padding: 5px; border-radius: 4px; border: 1px solid #ccc; font-size: 13px; }
     .btn-group { display: flex; gap: 8px; }
     button { flex: 1; padding: 10px; font-weight: bold; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+    
+    .mode-tab-group { display: flex; width: 100%; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; margin-bottom: 5px; }
+    .mode-tab { flex: 1; background: #e2e8f0; color: #4a5568; padding: 12px; text-align: center; font-weight: bold; cursor: pointer; transition: 0.2s; border: none; font-size: 14px; }
+    .mode-tab.active { background: #4a5568; color: white; }
+    .mode-tab.active#tab-edit { background: #007bff; }
+    .mode-tab.active#tab-sim { background: #28a745; }
+
+    .edit-palette { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; background: #f8f9fa; padding: 10px; border-radius: 4px; border: 1px solid #e2e8f0; }
+    .palette-btn { padding: 6px; font-size: 12px; border: 2px solid #ccc; border-radius: 4px; cursor: pointer; font-weight: bold; background: white; text-align: left; display: flex; align-items: center; gap: 4px; }
+    .palette-btn.selected { border-color: #333; box-shadow: 0 0 4px rgba(0,0,0,0.3); }
+
     #start-stop-btn { background: #28a745; }
     #start-stop-btn.paused { background: #ffc107; color: #333; }
     #reset-btn { background: #dc3545; }
+    #new-map-btn { background: #17a2b8; }
     #clear-img-btn { background: #6c757d; padding: 6px; font-size: 12px; margin-top: 5px; }
     button:hover { opacity: 0.9; }
+    button:disabled, .palette-btn:disabled { opacity: 0.3; cursor: not-allowed; }
     #canvas-container { border: 1px solid #ccc; position: relative; }
     #image-upload { font-size: 12px; margin-top: 4px; width: 100%; }
     .img-area { background: #f8f9fa; border: 1px dashed #ccc; padding: 10px; border-radius: 4px; }
@@ -32,43 +45,53 @@
     .legend-item { display: flex; align-items: center; gap: 3px; }
     .color-swatch { width: 12px; height: 12px; border: 1px solid #ccc; border-radius: 2px; }
 
-    .height-gradient {
-      height: 12px;
-      width: 100%;
-      background: linear-gradient(to right, #444, #fff);
-      border: 1px solid #ccc;
-      border-radius: 2px;
-      margin: 4px 0;
-    }
+    .height-gradient { height: 12px; width: 100%; background: linear-gradient(to right, #444, #fff); border: 1px solid #ccc; border-radius: 2px; margin: 4px 0; }
   </style>
 </head>
 <body>
 
-  <h1>山火事シミュレーター (v1.9.3)</h1>
+  <h1>山火事シミュレーター (v3.2)</h1>
   
   <div id="container">
     <div id="controls">
-      <div class="btn-group">
-        <button id="start-stop-btn">一時停止</button>
-        <button id="reset-btn">リセット</button>
+      
+      <div class="mode-tab-group">
+        <button id="tab-edit" class="mode-tab active">🛠️ 編集モード</button>
+        <button id="tab-sim" class="mode-tab">▶ シミュモード</button>
+      </div>
+
+      <div id="edit-panel">
+        <button id="new-map-btn" style="width: 100%; margin-bottom: 8px;">⛰️ マップ全体を自動生成</button>
+        <div class="stat-title" style="font-size: 12px; color: #4a5568;">🖌️ 配置ツール（長押しドラッグで連続描画）</div>
+        <div class="edit-palette">
+          <button class="palette-btn selected" data-type="tree"><div class="color-swatch" style="background:rgba(46,139,87,1);"></div>森林</button>
+          <button class="palette-btn" data-type="water"><div class="color-swatch" style="background:rgba(100,149,237,1);"></div>水</button>
+          <button class="palette-btn" data-type="rock"><div class="color-swatch" style="background:rgba(128,128,128,1);"></div>岩/市街</button>
+          <button class="palette-btn" data-type="empty"><div class="color-swatch" style="background:rgba(222,184,135,1);"></div>空き地</button>
+          <button class="palette-btn" data-type="fire" style="grid-column: span 2; justify-content: center; background: #fff5f5; border-color: #feb2b2; color: #c53030;">🔥 火災スタート地点</button>
+        </div>
+      </div>
+
+      <div id="sim-panel" style="display: none;">
+        <div class="btn-group">
+          <button id="start-stop-btn">スタート</button>
+          <button id="reset-btn">リセット</button>
+        </div>
       </div>
       
       <hr>
 
-      <!-- 航空写真読み込みエリア -->
-      <div class="param img-area">
+      <div class="param img-area" id="upload-area">
         <label>📸 航空写真から地形を生成</label>
         <input type="file" id="image-upload" accept="image/*">
         <button id="clear-img-btn" style="display:none;">画像を削除</button>
       </div>
 
-      <!-- スライダー類 -->
       <div id="density-area" class="param">
-        <label>森林密度: <span id="density-val">70</span>%</label>
+        <label>森林密度 (自動生成用): <span id="density-val">70</span>%</label>
         <input type="range" id="density" min="10" max="95" value="70">
       </div>
 
-      <!-- 山の複雑さスライダー -->
       <div id="noise-area" class="param">
         <label>⛰️ 山のうねり具合: <span id="noise-scale-val">4.0</span></label>
         <input type="range" id="noise-scale" min="1.0" max="10.0" step="0.5" value="4.0">
@@ -79,7 +102,6 @@
         <input type="range" id="prob" min="5" max="100" value="30">
       </div>
       
-      <!-- ★修正箇所：風向セレクトボックスの矢印の向きを進行方向に修正 -->
       <div class="param">
         <label>風向 / 風速: <span id="wind-val">2.0</span></label>
         <div class="btn-group" style="gap:5px;">
@@ -101,7 +123,6 @@
 
       <hr>
 
-      <!-- リアルタイム統計モニター -->
       <div class="stat-box">
         <div class="stat-title">📊 リアルタイム統計</div>
         <div class="stat-row" style="background: #edf2f7; padding: 2px 4px; border-radius: 3px; margin-bottom: 6px;">
@@ -116,35 +137,21 @@
         </div>
       </div>
 
-      <!-- 地質カテゴリ -->
-      <div class="stat-box">
-        <div class="stat-title">地質カテゴリ</div>
-        <div class="legend">
-          <div class="legend-item"><div class="color-swatch" style="background:rgba(46,139,87,1);"></div>森林</div>
-          <div class="legend-item"><div class="color-swatch" style="background:rgba(100,149,237,1);"></div>水</div>
-          <div class="legend-item"><div class="color-swatch" style="background:rgba(211,211,211,1);"></div>雪/氷</div>
-          <div class="legend-item"><div class="color-swatch" style="background:rgba(128,128,128,1);"></div>岩/市街</div>
-          <div class="legend-item"><div class="color-swatch" style="background:rgba(222,184,135,1);"></div>空き地</div>
-        </div>
-      </div>
-
-      <!-- 地形の高さ（高低差） -->
       <div class="stat-box">
         <div class="stat-title">⛰️ 地形の高さ（高低差）</div>
         <div style="font-size: 11px; color: #4a5568; line-height: 1.4;">
           各マスはベースの色に高低差が重なっています。<br>
-          <strong>色の明るさ（陰影）</strong>で標高を判別できます。
           <div class="height-gradient"></div>
           <div style="display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 4px;">
-            <span>低（谷・影）</span>
-            <span>高（山頂・日向）</span>
+            <span>低（谷）</span>
+            <span>高（山頂）</span>
           </div>
           <span style="color: #c53030;">※火は「低い場所」から「高い場所」へ向かって燃え広がりやすくなります。</span>
         </div>
       </div>
 
       <p style="font-size: 12px; color: #666; line-height: 1.4; margin: 0;">
-        【モード】<span id="mode-status" style="font-weight:bold; color:#28a745;">ランダム生成</span>
+        【モード】<span id="mode-status" style="font-weight:bold; color:#007bff;">編集モード</span>
       </p>
     </div>
 
@@ -166,7 +173,13 @@
     let nextGrid_state = [];
     let grid_height = [];   
     
-    let isRunning = true; 
+    let static_material_cache = [];
+    let static_height_cache = [];
+
+    let currentSystemMode = 'edit';
+    let selectedTool = 'tree';
+
+    let isRunning = false; 
     let imageBaseMaterialGrid = null;
     let imageBaseHeightGrid = null; 
 
@@ -183,12 +196,31 @@
       frameRate(10);
       
       currentNoiseSeed = Math.floor(random(10000)); 
-      initSimulation();
+      generateNewTerrain();
+      noLoop(); 
+
+      document.getElementById('tab-edit').addEventListener('click', () => switchMode('edit'));
+      document.getElementById('tab-sim').addEventListener('click', () => switchMode('sim'));
+
+      const paletteBtns = document.querySelectorAll('.palette-btn');
+      paletteBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          paletteBtns.forEach(b => b.classList.remove('selected'));
+          let target = e.target.closest('.palette-btn');
+          target.classList.add('selected');
+          selectedTool = target.getAttribute('data-type');
+        });
+      });
+
+      document.getElementById('new-map-btn').addEventListener('click', () => {
+        currentNoiseSeed = Math.floor(random(10000));
+        generateNewTerrain();
+      });
 
       document.getElementById('reset-btn').addEventListener('click', () => {
-        currentNoiseSeed = Math.floor(random(10000));
-        initSimulation();
+        resetSimulationState(); 
       });
+
       document.getElementById('image-upload').addEventListener('change', handleImageUpload);
       document.getElementById('clear-img-btn').addEventListener('click', clearImageGrid);
       
@@ -201,12 +233,59 @@
       document.getElementById('wind').addEventListener('input', updateUIVal);
       document.getElementById('slope-weight').addEventListener('input', updateUIVal); 
       
-      document.getElementById('density').addEventListener('change', initSimulation);
-      document.getElementById('noise-scale').addEventListener('change', initSimulation);
+      document.getElementById('density').addEventListener('change', generateNewTerrain);
+      document.getElementById('noise-scale').addEventListener('change', generateNewTerrain);
 
       document.getElementById('wind-dir').addEventListener('change', () => {
         if (!isRunning) redraw();
       });
+    }
+
+    function switchMode(mode) {
+      currentSystemMode = mode;
+      
+      const tabEdit = document.getElementById('tab-edit');
+      const tabSim = document.getElementById('tab-sim');
+      const panelEdit = document.getElementById('edit-panel');
+      const panelSim = document.getElementById('sim-panel');
+      const uploadArea = document.getElementById('upload-area');
+      const modeStatus = document.getElementById('mode-status');
+
+      if (mode === 'edit') {
+        tabEdit.classList.add('active');
+        tabSim.classList.remove('active');
+        panelEdit.style.display = 'block';
+        panelSim.style.display = 'none';
+        uploadArea.style.opacity = imageBaseMaterialGrid ? '0.3' : '1.0';
+        modeStatus.innerText = '編集モード';
+        modeStatus.style.color = '#007bff';
+        
+        if (isRunning) {
+          toggleRunning();
+        }
+        noLoop();
+        redraw();
+      } else {
+        tabEdit.classList.remove('active');
+        tabSim.classList.add('active');
+        panelEdit.style.display = 'none';
+        panelSim.style.display = 'block';
+        uploadArea.style.opacity = '0.3';
+        modeStatus.innerText = imageBaseMaterialGrid ? '航空写真モード' : 'ランダム生成';
+        modeStatus.style.color = imageBaseMaterialGrid ? '#007bff' : '#28a745';
+
+        saveCurrentToCache();
+        resetSimulationState();
+      }
+    }
+
+    function saveCurrentToCache() {
+      for(let x=0; x<numCells; x++) {
+        for(let y=0; y<numCells; y++) {
+          static_material_cache[x][y] = grid_material[x][y];
+          static_height_cache[x][y] = grid_height[x][y];
+        }
+      }
     }
 
     function toggleRunning() {
@@ -216,13 +295,13 @@
       if (isRunning) { 
         noLoop(); 
         isRunning = false;
-        btn.innerText = "再開";
-        btn.classList.add('paused');
+        btn.innerText = "スタート";
+        btn.classList.remove('paused');
       } else { 
         loop(); 
         isRunning = true;
         btn.innerText = "一時停止";
-        btn.classList.remove('paused');
+        btn.classList.add('paused');
       }
     }
 
@@ -230,7 +309,41 @@
       document.getElementById(`${e.target.id}-val`).innerText = e.target.value;
     }
 
-    function initSimulation() {
+    function generateNewTerrain() {
+      static_material_cache = [];
+      static_height_cache = [];
+
+      if (imageBaseMaterialGrid !== null) {
+        for (let x = 0; x < numCells; x++) {
+          static_material_cache[x] = [];
+          static_height_cache[x] = [];
+          for (let y = 0; y < numCells; y++) {
+            static_material_cache[x][y] = imageBaseMaterialGrid[x][y];
+            static_height_cache[x][y] = imageBaseHeightGrid[x][y];
+          }
+        }
+      } else {
+        noiseSeed(currentNoiseSeed);
+        let density = document.getElementById('density').value / 100;
+        let ns = document.getElementById('noise-scale').value * 0.01; 
+
+        for (let x = 0; x < numCells; x++) {
+          static_material_cache[x] = [];
+          static_height_cache[x] = [];
+          for (let y = 0; y < numCells; y++) {
+            let nVal = noise(x * ns, y * ns); 
+            static_height_cache[x][y] = nVal; 
+
+            let treeThreshold = density + (nVal - 0.5) * 0.2; 
+            let isTree = random(1) < treeThreshold;
+            static_material_cache[x][y] = isTree ? MATERIAL_TREE : MATERIAL_EMPTY;
+          }
+        }
+      }
+      resetSimulationState();
+    }
+
+    function resetSimulationState() {
       grid_material = [];
       grid_state = [];
       nextGrid_state = [];
@@ -240,54 +353,34 @@
       hasStartedBurning = false;
       isBurningFinished = false; 
       
+      isRunning = false;
+      noLoop();
       const startStopBtn = document.getElementById('start-stop-btn');
-      if (!isRunning) {
-        isRunning = true;
-        loop();
+      if (startStopBtn) {
+        startStopBtn.innerText = "スタート";
+        startStopBtn.classList.remove('paused');
       }
-      startStopBtn.innerText = "一時停止";
-      startStopBtn.classList.remove('paused');
       
-      if (imageBaseMaterialGrid !== null) {
-        for (let x = 0; x < numCells; x++) {
-          grid_material[x] = [];
-          grid_state[x] = [];
-          nextGrid_state[x] = [];
-          grid_height[x] = [];
-          for (let y = 0; y < numCells; y++) {
-            grid_material[x][y] = imageBaseMaterialGrid[x][y];
-            grid_height[x][y] = imageBaseHeightGrid[x][y]; 
-            grid_state[x][y] = 0; 
-            nextGrid_state[x][y] = 0;
-            if (grid_material[x][y] === MATERIAL_TREE) initialTreeCount++;
+      for (let x = 0; x < numCells; x++) {
+        grid_material[x] = [];
+        grid_state[x] = [];
+        nextGrid_state[x] = [];
+        grid_height[x] = [];
+        for (let y = 0; y < numCells; y++) {
+          grid_material[x][y] = static_material_cache[x][y];
+          grid_height[x][y] = static_height_cache[x][y];
+          grid_state[x][y] = static_material_cache[x][y] === 'INITIAL_FIRE' ? 1 : 0; 
+          nextGrid_state[x][y] = grid_state[x][y];
+          
+          if (grid_material[x][y] === 'INITIAL_FIRE') {
+            grid_material[x][y] = MATERIAL_EMPTY; 
           }
-        }
-      } else {
-        noiseSeed(currentNoiseSeed);
-        let density = document.getElementById('density').value / 100;
-        let ns = document.getElementById('noise-scale').value * 0.01; 
-
-        for (let x = 0; x < numCells; x++) {
-          grid_material[x] = [];
-          grid_state[x] = [];
-          nextGrid_state[x] = [];
-          grid_height[x] = [];
-          for (let y = 0; y < numCells; y++) {
-            let nVal = noise(x * ns, y * ns); 
-            grid_height[x][y] = nVal; 
-
-            let treeThreshold = density + (nVal - 0.5) * 0.2; 
-            let isTree = random(1) < treeThreshold;
-            
-            grid_material[x][y] = isTree ? MATERIAL_TREE : MATERIAL_EMPTY;
-            grid_state[x][y] = 0; 
-            nextGrid_state[x][y] = 0;
-            if (isTree) initialTreeCount++;
-          }
+          if (grid_material[x][y] === MATERIAL_TREE) initialTreeCount++;
         }
       }
 
       updateStatistics();
+      redraw();
     }
 
     function updateStatistics() {
@@ -333,19 +426,19 @@
     }
 
     function handleImageUpload(event) {
+      if (currentSystemMode !== 'edit') return;
       let file = event.target.files[0];
       if (file) {
         let reader = new FileReader();
         reader.onload = (e) => {
           loadImage(e.target.result, (img) => {
             generateImageBaseMaterial(img);
-            initSimulation();
+            generateNewTerrain();
             
             document.getElementById('clear-img-btn').style.display = 'block';
             document.getElementById('density-area').style.opacity = '0.3';
             document.getElementById('noise-area').style.opacity = '0.3'; 
-            document.getElementById('mode-status').innerText = '航空写真モード';
-            document.getElementById('mode-status').style.color = '#007bff';
+            document.getElementById('new-map-btn').disabled = true; 
           });
         };
         reader.readAsDataURL(file);
@@ -392,9 +485,8 @@
       document.getElementById('clear-img-btn').style.display = 'none';
       document.getElementById('density-area').style.opacity = '1.0';
       document.getElementById('noise-area').style.opacity = '1.0';
-      document.getElementById('mode-status').innerText = 'ランダム生成';
-      document.getElementById('mode-status').style.color = '#28a745';
-      initSimulation(); 
+      document.getElementById('new-map-btn').disabled = false; 
+      generateNewTerrain(); 
     }
 
     function draw() {
@@ -430,6 +522,11 @@
           noStroke();
           rect(x * cellSize, y * cellSize, cellSize, cellSize);
         }
+      }
+
+      if (currentSystemMode === 'edit') {
+        handleEditDraw();
+        return;
       }
 
       if (isBurningFinished) {
@@ -476,9 +573,50 @@
         isBurningFinished = true;
         isRunning = false;
         const btn = document.getElementById('start-stop-btn');
-        btn.innerText = "鎮火 (終了)";
-        btn.classList.add('paused');
+        btn.innerText = "スタート";
+        btn.classList.remove('paused');
         document.getElementById('stat-steps').innerText = `${stepCount} step (完全鎮火)`;
+      }
+    }
+
+    function handleEditDraw() {
+      if (!mouseIsPressed) return;
+      
+      let cellX = Math.floor(mouseX / cellSize);
+      let cellY = Math.floor(mouseY / cellSize);
+      
+      if (cellX >= 0 && cellX < numCells && cellY >= 0 && cellY < numCells) {
+        if (selectedTool === 'tree') {
+          grid_material[cellX][cellY] = MATERIAL_TREE;
+          grid_state[cellX][cellY] = 0;
+        } else if (selectedTool === 'water') {
+          grid_material[cellX][cellY] = MATERIAL_WATER;
+          grid_state[cellX][cellY] = 0;
+        } else if (selectedTool === 'rock') {
+          grid_material[cellX][cellY] = MATERIAL_ROCK;
+          grid_state[cellX][cellY] = 0;
+        } else if (selectedTool === 'empty') {
+          grid_material[cellX][cellY] = MATERIAL_EMPTY;
+          grid_state[cellX][cellY] = 0;
+        } else if (selectedTool === 'fire') {
+          grid_material[cellX][cellY] = 'INITIAL_FIRE';
+          grid_state[cellX][cellY] = 1; 
+        }
+        
+        saveCurrentToCache();
+        updateStatistics();
+        redraw();
+      }
+    }
+
+    // ★修正箇所：マウスの位置が「キャンバスの上」にある時だけイベントをブロックするように条件分岐
+    function mouseDragged() {
+      if (currentSystemMode === 'edit') {
+        // マウスの座標がp5.jsのキャンバス（画角内）に入っているかチェック
+        if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+          handleEditDraw();
+          return false; // キャンバス上での不要な選択・スクロールのみ防止
+        }
       }
     }
 
@@ -513,16 +651,23 @@
 
     function mousePressed() {
       if (grid_material.length < numCells || grid_state.length < numCells) return;
-      if (isBurningFinished) return; 
-
-      let cellX = Math.floor(mouseX / cellSize);
-      let cellY = Math.floor(mouseY / cellSize);
-      if (cellX >= 0 && cellX < numCells && cellY >= 0 && cellY < numCells) {
-        if ((grid_material[cellX][cellY] === MATERIAL_TREE || grid_material[cellX][cellY] === MATERIAL_EMPTY) && grid_state[cellX][cellY] === 0) {
-          grid_state[cellX][cellY] = 1;
-          nextGrid_state[cellX][cellY] = 1;
-          updateStatistics(); 
-          if (!isRunning) redraw(); 
+      
+      // クリック位置がキャンバス内にあるときだけマップ変更処理を行う
+      if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+        if (currentSystemMode === 'edit') {
+          handleEditDraw();
+        } else {
+          if (isBurningFinished) return;
+          let cellX = Math.floor(mouseX / cellSize);
+          let cellY = Math.floor(mouseY / cellSize);
+          if (cellX >= 0 && cellX < numCells && cellY >= 0 && cellY < numCells) {
+            if ((grid_material[cellX][cellY] === MATERIAL_TREE || grid_material[cellX][cellY] === MATERIAL_EMPTY) && grid_state[cellX][cellY] === 0) {
+              grid_state[cellX][cellY] = 1;
+              nextGrid_state[cellX][cellY] = 1;
+              updateStatistics(); 
+              if (!isRunning) redraw(); 
+            }
+          }
         }
       }
     }
